@@ -19,6 +19,9 @@ cat /home/data/t250450/LY/human_hiv_htlv_genome/human_hiv_htlv_genome.fa \
     | sed -E 's/^>MT />chrM /' \
     > human_hiv_htlv_genome_modified.fa
 
+#将fa与gtf文件的染色体名称调整一致
+sed -E 's/^>(chrM)/>\1T/' human_hiv_htlv_genome_modified.fa > human_hiv_htlv_genome_chr_modified.fa
+
 #将
 awk -F'\t' -v OFS='\t' '
 {
@@ -70,5 +73,6 @@ grep -Ff gene_allowlist human_hiv_htlv_genome_modified.gtf \
 
 # Create reference package
 cellranger mkref \
-    --genome "hg38_htlv1_hiv1" --fasta human_hiv_htlv_genome_modified.fa --genes human_hiv_htlv_genome_modified_filtered.gtf\
-    --nthreads=16
+    --genome "hg38_htlv1_hiv1" --fasta human_hiv_htlv_genome_chr_modified.fa --genes human_hiv_htlv_genome_modified_filtered.gtf\
+    --nthreads=16 \
+    --memgb=250
