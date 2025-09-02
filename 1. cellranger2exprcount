@@ -1,4 +1,74 @@
 
-#get cellranger soft
+#下载软件
 #https://www.10xgenomics.com/support/software/cell-ranger/downloads
-#
+#after input base information, we can get "cellranger-9.0.1.tar"
+
+tar -xvf cellranger-9.0.1.tar 
+#tar：用于归档和解压文件的命令。-x：表示解压。-v：表示显示解压过程中的文件名。-f：指定要解压的文件名
+
+#设置临时环境变量
+export PATH=~/single_cell_analysis/yxy/cellranger-9.0.1:$PATH
+
+#构建hg38+htlv-1+hiv-1的多基因组
+mkdir -p hg38_htlv1_hiv1
+
+#将fastq的Ensembl格式转化为GENCODE
+cat /home/data/t250450/LY/human_hiv_htlv_genome/human_hiv_htlv_genome.fa \
+    | sed -E 's/^>(\S+).*/>\1 \1/' \
+    | sed -E 's/^>([0-9]+|[XY]) />chr\1 /' \
+    | sed -E 's/^>MT />chrM /' \
+    > human_hiv_htlv_genome_modified.fa
+
+#将
+awk -F'\t' -v OFS='\t' '
+{
+    if ($1 ~ /^[0-9XYMT]/) {  # 检查染色体名是否为数字或特定字母
+        $1 = "chr" $1;       # 在染色体名前添加 "chr"
+    }
+    print;                    # 打印修改后的行
+}' /home/data/t250450/LY/human_hiv_htlv_genome/human_hiv_htlv_genome.gtf > human_hiv_htlv_genome_chr.gtf
+
+
+#将gtf的转录组id的后缀改到gene_id后
+cat human_hiv_htlv_genome_chr.gtf \
+    | sed -E 's/gene_id "'"(ENS(MUS)?[GTE][0-9]+)\.([0-9]+)"'";/gene_id "\1"; gene_version "\3";/' \
+    | sed -E 's/transcript_id "'"(ENS(MUS)?[GTE][0-9]+)\.([0-9]+)"'";/transcript_id "\1"; transcript_version "\3";/' \
+    | sed -E 's/exon_id "'"(ENS(MUS)?[GTE][0-9]+)\.([0-9]+)"'";/exon_id "\1"; exon_version "\3";/' \
+    > human_hiv_htlv_genome_modified.gtf
+
+#继续调整gtf
+BIOTYPE_PATTERN=\
+"(protein_coding|protein_coding_LoF|lncRNA|\
+IG_C_gene|IG_D_gene|IG_J_gene|IG_LV_gene|IG_V_gene|\
+IG_V_pseudogene|IG_J_pseudogene|IG_C_pseudogene|\
+TR_C_gene|TR_D_gene|TR_J_gene|TR_V_gene|\
+TR_V_pseudogene|TR_J_pseudogene)"
+GENE_PATTERN="gene_biotype \"${BIOTYPE_PATTERN}\"" #注意：gene_biotype在gtf文件中的具体名称
+TX_PATTERN="transcript_biotype \"${BIOTYPE_PATTERN}\"" #注意：transcript_biotype在gtf文件中的具体名称
+READTHROUGH_PATTERN="tag \"readthrough_transcript\""
+
+#进一步筛选，过滤，获取gene_allowlist
+cat human_hiv_htlv_genome_modified.gtf \
+    | awk '$3 == "transcript"' \
+    | grep -E "$GENE_PATTERN" \
+    | grep -E "$TX_PATTERN" \
+    | grep -Ev "$READTHROUGH_PATTERN" \
+    | sed -E 's/.*(gene_id "[^"]+").*/\1/' \
+    | sort \
+    | uniq \
+    > gene_allowlist
+
+#基于gene_allowlist过滤gtf文件
+# Copy header lines beginning with "#"
+grep -E "^#" human_hiv_htlv_genome_modified.gtf > human_hiv_htlv_genome_modified_filtered.gtf
+
+# Filter to the gene allowlist, and then remove PAR_Y genes
+grep -Ff gene_allowlist human_hiv_htlv_genome_modified.gtf \
+    | awk -F "\t" '$1 != "chrY" || $1 == "chrY" && $4 >= 2752083 && $4 < 56887903 && !/ENSG00000290840/' \
+    >> human_hiv_htlv_genome_modified_filtered.gtf
+
+
+# Create reference package
+cellranger mkref \
+    --genome "hg38_htlv1_hiv1" --fasta human_hiv_htlv_genome_modified.fa --genes human_hiv_htlv_genome_modified_filtered.gtf\
+    --nthreads=16
